@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Генеральный план Усть-Кута</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            font-family: Arial, sans-serif;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Сайдбар */
+        #sidebar {
+            width: 250px;
+            height: 100%;
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 1000;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.3);
+            
+            /* Добавляем для анимации плавного сворачивания */
+            position: relative;
+            transition: width 0.3s ease, padding 0.3s ease; 
+        }
+
+        /* Стили для скрытого состояния сайдбара */
+        #sidebar.collapsed {
+            width: 0;
+            padding: 20px 0; /* Убираем боковые отступы, чтобы контент не вылезал */
+            overflow: hidden; /* Скрывает текст кнопок при сворачивании */
+        }
+
+        /* Кнопка переключения (гамбургер/стрелка) */
+        #toggle-sidebar {
+            position: fixed; /* Изменили на fixed */
+            top: 15px;
+            left: 250px; /* Изначально стоит сразу за сайдбаром (ширина сайдбара 250px) */
+            width: 35px;
+            height: 35px;
+            background-color: #2c3e50;
+            color: white;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+            z-index: 1001;
+            transition: left 0.3s ease; /* Плавный сдвиг вместе с сайдбаром */
+        }
+
+        #toggle-sidebar:hover {
+            background-color: #34495e;
+        }
+
+        /* Когда у сайдбара есть класс collapsed, двигаем кнопку к левому краю экрана */
+        #sidebar.collapsed ~ #toggle-sidebar {
+            left: 0;
+        }
+        
+        #sidebar h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #34495e;
+            padding-bottom: 10px;
+        }
+        .nav-btn {
+            padding: 12px;
+            background-color: #34495e;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: left;
+            font-size: 16px;
+            transition: background 0.2s;
+        }
+        .nav-btn:hover {
+            background-color: #415b76;
+        }
+        .nav-btn.active {
+            background-color: #1abc9c;
+            font-weight: bold;
+        }
+
+        /* Контейнер для карт */
+        #map-container {
+            flex: 1;
+            height: 100%;
+            position: relative;
+            background-color: #e5e5e5;
+        }
+        .map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .map.active {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        /* отключение флага в атрибуции к картам */
+        .leaflet-attribution-flag { display: none !important; }
+
+        /* настройка размера шрифта */
+        .leaflet-control-layers-list, 
+        .leaflet-control-layers-expanded {
+        font-size: 16px;
+        }
+
+        /* скрывает кнопки масштаба вверху */
+        .leaflet-top .leaflet-control-zoom {
+            display: none !important;
+        }
+
+        /* легенда для карт */
+        .map-legend {
+            position: fixed;
+            bottom: 20px;
+            right: 3px;
+            width: 160px;
+            z-index: 9999;
+            padding: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border: 2px solid grey;
+            font-size: 14px;
+            font-family: sans-serif;
+        }
+
+        .map-legend ul {
+            list-style: none;
+            margin: 8px 0 0 0;
+            padding: 0;
+        }
+
+        .map-legend li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+
+        .map-legend li span {
+            display: inline-block;
+            width: 20px;
+            height: 10px;
+            border: 1px solid black;
+            background-color: var(--color);
+            opacity: 0.5;
+        }
+  
+        /* иконка в контролере */
+        .layer-legend-icon {
+            display: inline-block;
+            width: 24px;
+            height: 16px;
+            margin-right: 6px;
+            }
+
+        /* иконка границ города */
+        path.boundary { stroke: blue; fill: #ffffff; }
+        span.boundary { border: 2px solid blue; }
+
+        /* иконка парка */
+        path.park { stroke: #aaaaaa; fill: #32CD32; }
+        span.park { border: 2px solid #aaaaaa; background-color: #32CD32; opacity: 0.8; }
+
+
+        /* иконка жилых кварталов */
+        path.blocks { stroke: #aaaaaa; fill: #5088c2; }
+        span.blocks { border: 2px solid #aaaaaa; background-color: #5088c2; opacity: 0.8; }
+
+        /* иконка промышленной зоны */
+        path.prom_zone { stroke: #aaaaaa; fill: #fdd29d; }
+        span.prom_zone { border: 2px solid #aaaaaa; background-color: #fdd29d; opacity: 0.8; }
+
+        /* иконка общественной зоны */
+        path.business { stroke: #aaaaaa; fill: #a542ce; }
+        span.business { border: 2px solid #aaaaaa; background-color: #a542ce; opacity: 0.8; }
+        
+        /* иконка зоны отдыха */
+        path.resort { stroke: #aaaaaa; fill: #f765ad; }
+        span.resort { border: 2px solid #aaaaaa; background-color: #f765ad; opacity: 0.8; }
+        
+        /* иконка зоны кладбищ */
+        path.cemeteries { stroke: #aaaaaa; fill: #7c512d; }
+        span.cemeteries { border: 2px solid #aaaaaa; background-color: #7c512d; opacity: 0.8; }
+        
+        /* иконка транспортной зоны */
+        path.car { stroke: #aaaaaa; fill: #f7ef61; }
+        span.car { border: 2px solid #aaaaaa; background-color: #f7ef61; opacity: 0.8; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h3>Генеральный план Усть-Кута</h3>
+        <button class="nav-btn active" onclick="switchMap('map1', this)">Изохроны</button>
+        <button class="nav-btn" onclick="switchMap('map2', this)">Функциональные зоны</button>
+    </div>
+
+    <button id="toggle-sidebar">☰</button>
+
+    <div id="map-container">
+        <div id="map1" class="map active">
+        <div class="map-legend">
+            <b>Пешая доступность</b>
+                <ul>
+                    <li><span style="--color: #ffffcc;"></span> 5 мин</li>
+                    <li><span style="--color: #d0edc0;"></span> 10 мин</li>
+                    <li><span style="--color: #a1dab4;"></span> 15 мин</li>
+                    <li><span style="--color: #71c8bc;"></span> 30 мин</li>
+                    <li><span style="--color: #41b6c4;"></span> 45 мин</li>
+                    <li><span style="--color: #379bbe;"></span> 60 мин</li>
+                    <li><span style="--color: #2c7fb8;"></span> 90 мин</li>
+                    <li><span style="--color: #295aa6;"></span> 120 мин</li>
+                </ul>
+        </div>
+        </div>
+        <div id="map2" class="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // ссылки на файлы json
+        const url_map1 = 'data/boundary.geojson';
+        const url_map1_1 = 'data/points_school.geojson';
+        const url_map1_2 = 'data/school.geojson';
+        const url_map1_3 = 'data/points_kindergarden.geojson';
+        const url_map1_4 = 'data/kindergarden.geojson';
+        const url_map1_5 = 'data/points_hospital.geojson';
+        const url_map1_6 = 'data/hospital.geojson';
+        const url_map2 = 'data/parks.geojson';
+        const url_map3 = 'data/town_blocks.geojson';
+        const url_map4 = 'data/prom_zona.geojson';
+        const url_map5 = 'data/business_zones.geojson';
+        const url_map6 = 'data/resort.geojson';
+        const url_map7 = 'data/cemeteries.geojson';
+        const url_map8 = 'data/car.geojson';
+
+        // ==========================================
+        // ИНИЦИАЛИЗАЦИЯ КАРТЫ 1
+        // ==========================================
+        const map1 = L.map('map1').setView([56.8, 105.8334], 10); // Центр для Усть-Кута
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map1);
+
+        // добавление масштабной линейки
+        L.control.scale().addTo(map1);
+
+        // перемещаем кнопки масштаба вниз слева
+        L.control.zoom({
+            position: 'bottomleft'
+        }).addTo(map1);
+
+        // создание легенды для карты
+        const control1 = L.control.layers(null, null, { collapsed: true }).addTo(map1);
+
+        // загрузка границ поселения
+        fetch(url_map1)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить данные границ поселения');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup1 = L.geoJSON(geoData, {
+                    style: {
+                        color: "blue",
+                        fillColor: "#32CD32",
+                        fillOpacity: 0.0,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        // Проверяем, есть ли свойство name в JSON для всплывающего окна
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Усть-Кут";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map1);
+
+                // Автоматически центрируем карту по границам загруженных объектов
+                if (geoData.features && geoData.features.length > 0) {
+                    map1.fitBounds(layerGroup1.getBounds());
+                }
+
+                const layerNameBoundary = '<span class="layer-legend-icon boundary"></span>Граница города';
+
+                // Добавляем слой в созданную ранее легенду
+                control1.addOverlay(layerGroup1, layerNameBoundary);
+            })
+            .catch(error => console.error('Ошибка отображения границ поселения:', error));
+
+        // загрузка точек со школами
+            const svgIconSchool = L.icon({
+                iconUrl: 'data/school-svgrepo-com.svg',
+                iconSize: [32, 32],
+                iconAnchor: [16, 32],
+                popupAnchor: [0, -32]
+            });
+
+            fetch(url_map1_1)
+                .then(response => {
+                    if (!response.ok) throw new Error('Не удалось загрузить точки со школами');
+                return response.json();
+                })
+            .then(geoData => {
+            // Создаем слой Leaflet из полученных данных
+                const layerGroup1 = L.geoJSON(geoData, {
+                    pointToLayer: (feature, latlng) => {
+                return L.marker(latlng, { icon: svgIconSchool });
+            },
+            onEachFeature: (feature, layer) => {
+                // Проверяем, есть ли свойство name в JSON для всплывающего окна
+                let popupText = feature.properties && feature.properties.name 
+                    ? feature.properties.name 
+                    : "Школа";
+                layer.bindPopup(popupText);
+            }
+            }).addTo(map1);
+
+            // Автоматически центрируем карту по границам загруженных объектов
+                if (geoData.features && geoData.features.length > 0) {
+                    map1.fitBounds(layerGroup1.getBounds());
+                }
+
+            const layerNameSchool = `<span style="display: inline-flex; align-items: center;">
+            <img src="data/school-svgrepo-com.svg" style="width: 16px; height: 16px; margin-right: 6px;">
+            Школы
+            </span>
+            `;
+
+            // Добавляем слой в созданную ранее легенду
+                control1.addOverlay(layerGroup1, layerNameSchool);
+                })
+            .catch(error => console.error('Ошибка отображения школ:', error));
+
+        // загрузка изохрон для школ
+
+        function getColorByMins(mins) {
+            switch (mins) {
+                case 5:
+                    return "#ffffcc";
+                case 10:
+                    return "#d0edc0";
+                case 15:
+                    return "#a1dab4";
+                case 30:
+                    return "#71c8bc";
+                case 45:
+                    return "#41b6c4";
+                case 60:
+                    return "#379bbe";
+                case 90:
+                    return "#2c7fb8";
+                case 120:
+                    return "#295aa6";
+            }
+        }
+
+        fetch(url_map1_2)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить данные изохрон для школ');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup1 = L.geoJSON(geoData, {
+                    style: function (feature) {
+                    // Получаем значение минут из свойств текущего объекта
+                        const minsValue = feature.properties && feature.properties.AA_MINS;
+        
+                    // Получаем цвет для этого значения
+                        const dynamicColor = getColorByMins(minsValue);
+
+                    // Возвращаем объект со стилями для Leaflet
+                        return {
+                            color: dynamicColor,       // Цвет границы
+                            fillColor: dynamicColor,   // Цвет заливки
+                            fillOpacity: 0.5,          // Прозрачность
+                            weight: 2                  // Толщина линии
+                            };
+                    },
+                    onEachFeature: (feature, layer) => {
+                        if (feature.properties && feature.properties.AA_MINS) {
+                        layer.bindPopup(`Зона доступности: ${feature.properties.AA_MINS} мин.`);
+                        }
+                    }
+                }).addTo(map1);
+
+                // Автоматически центрируем карту по границам загруженных объектов
+                if (geoData.features && geoData.features.length > 0) {
+                    map1.fitBounds(layerGroup1.getBounds());
+                }
+
+                // Добавляем слой в созданную ранее легенду
+                control1.addOverlay(layerGroup1, 'Изохроны для школ');
+            })
+            .catch(error => console.error('Ошибка отображения изохрон для школ:', error));
+
+        // загрузка точек с детскими садами
+            const svgIconKindergarden = L.icon({
+                iconUrl: 'data/kindergarden-svgrepo-com.svg',
+                iconSize: [32, 32],
+                iconAnchor: [16, 32],
+                popupAnchor: [0, -32]
+            });
+
+            fetch(url_map1_3)
+                .then(response => {
+                    if (!response.ok) throw new Error('Не удалось загрузить точки с детскими садами');
+                return response.json();
+                })
+            .then(geoData => {
+            // Создаем слой Leaflet из полученных данных
+                const layerGroup1 = L.geoJSON(geoData, {
+                    pointToLayer: (feature, latlng) => {
+                return L.marker(latlng, { icon: svgIconKindergarden });
+            },
+            onEachFeature: (feature, layer) => {
+                // Проверяем, есть ли свойство name в JSON для всплывающего окна
+                let popupText = feature.properties && feature.properties.name 
+                    ? feature.properties.name 
+                    : "Детский сад";
+                layer.bindPopup(popupText);
+            }
+            });
+
+            // Автоматически центрируем карту по границам загруженных объектов
+                if (geoData.features && geoData.features.length > 0) {
+                    map1.fitBounds(layerGroup1.getBounds());
+                }
+
+            const layerNameKindergarden = `<span style="display: inline-flex; align-items: center;">
+            <img src="data/kindergarden-svgrepo-com.svg" style="width: 16px; height: 16px; margin-right: 6px;">
+            Детские сады
+            </span>
+            `;
+
+            // Добавляем слой в созданную ранее легенду
+                control1.addOverlay(layerGroup1, layerNameKindergarden);
+                })
+            .catch(error => console.error('Ошибка отображения детских садов:', error));
+
+        // загрузка изохрон для детских садов
+
+        fetch(url_map1_4)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить данные изохрон для детских садов');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup1 = L.geoJSON(geoData, {
+                    style: function (feature) {
+                    // Получаем значение минут из свойств текущего объекта
+                        const minsValue = feature.properties && feature.properties.AA_MINS;
+        
+                    // Получаем цвет для этого значения
+                        const dynamicColor = getColorByMins(minsValue);
+
+                    // Возвращаем объект со стилями для Leaflet
+                        return {
+                            color: dynamicColor,       // Цвет границы
+                            fillColor: dynamicColor,   // Цвет заливки
+                            fillOpacity: 0.5,          // Прозрачность
+                            weight: 2                  // Толщина линии
+                            };
+                    },
+                    onEachFeature: (feature, layer) => {
+                        if (feature.properties && feature.properties.AA_MINS) {
+                        layer.bindPopup(`Зона доступности: ${feature.properties.AA_MINS} мин.`);
+                        }
+                    }
+                });
+
+                // Автоматически центрируем карту по границам загруженных объектов
+                if (geoData.features && geoData.features.length > 0) {
+                    map1.fitBounds(layerGroup1.getBounds());
+                }
+
+                // Добавляем слой в созданную ранее легенду
+                control1.addOverlay(layerGroup1, 'Изохроны для детских садов');
+            })
+            .catch(error => console.error('Ошибка отображения изохрон для детских садов:', error));
+
+        // загрузка точек с медицинскими учреждениями
+            const svgIconHospital = L.icon({
+                iconUrl: 'data/hospital-svgrepo-com.svg',
+                iconSize: [32, 32],
+                iconAnchor: [16, 32],
+                popupAnchor: [0, -32]
+            });
+
+            fetch(url_map1_5)
+                .then(response => {
+                    if (!response.ok) throw new Error('Не удалось загрузить точки с медицинскими учреждениями');
+                return response.json();
+                })
+            .then(geoData => {
+            // Создаем слой Leaflet из полученных данных
+                const layerGroup1 = L.geoJSON(geoData, {
+                    pointToLayer: (feature, latlng) => {
+                return L.marker(latlng, { icon: svgIconHospital });
+            },
+            onEachFeature: (feature, layer) => {
+                // Проверяем, есть ли свойство name в JSON для всплывающего окна
+                let popupText = feature.properties && feature.properties.name 
+                    ? feature.properties.name 
+                    : "Медицинское учреждение";
+                layer.bindPopup(popupText);
+            }
+            });
+
+            // Автоматически центрируем карту по границам загруженных объектов
+                if (geoData.features && geoData.features.length > 0) {
+                    map1.fitBounds(layerGroup1.getBounds());
+                }
+
+            const layerNameHospital = `<span style="display: inline-flex; align-items: center;">
+            <img src="data/hospital-svgrepo-com.svg" style="width: 16px; height: 16px; margin-right: 6px;">
+            Медицинские учреждения
+            </span>
+            `;
+
+            // Добавляем слой в созданную ранее легенду
+                control1.addOverlay(layerGroup1, layerNameHospital);
+                })
+            .catch(error => console.error('Ошибка отображения медицинских учреждений:', error));
+
+        // загрузка изохрон для медицинских учреждений
+
+        fetch(url_map1_6)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить данные изохрон для медицинских учреждений');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup1 = L.geoJSON(geoData, {
+                    style: function (feature) {
+                    // Получаем значение минут из свойств текущего объекта
+                        const minsValue = feature.properties && feature.properties.AA_MINS;
+        
+                    // Получаем цвет для этого значения
+                        const dynamicColor = getColorByMins(minsValue);
+
+                    // Возвращаем объект со стилями для Leaflet
+                        return {
+                            color: dynamicColor,       // Цвет границы
+                            fillColor: dynamicColor,   // Цвет заливки
+                            fillOpacity: 0.5,          // Прозрачность
+                            weight: 2                  // Толщина линии
+                            };
+                    },
+                    onEachFeature: (feature, layer) => {
+                        if (feature.properties && feature.properties.AA_MINS) {
+                        layer.bindPopup(`Зона доступности: ${feature.properties.AA_MINS} мин.`);
+                        }
+                    }
+                });
+
+                // Автоматически центрируем карту по границам загруженных объектов
+                if (geoData.features && geoData.features.length > 0) {
+                    map1.fitBounds(layerGroup1.getBounds());
+                }
+
+                // Добавляем слой в созданную ранее легенду
+                control1.addOverlay(layerGroup1, 'Изохроны для медицинских учреждений');
+            })
+            .catch(error => console.error('Ошибка отображения изохрон для медицинских учреждений:', error));
+
+        // ==========================================
+        // ИНИЦИАЛИЗАЦИЯ КАРТЫ 2
+        // ==========================================
+        const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'});
+
+        const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: '© Esri'});
+
+        const map2 = L.map('map2', {
+            center: [56.8, 105.8334],
+            zoom: 10,
+            layers: [osmLayer]
+        });
+
+        // объект с базовыми слоями для переключателя
+        const baseMaps = {
+            "Карта OpenStreetMap": osmLayer,
+            "Спутник Esri": satelliteLayer
+        };
+
+        // добавление масштабной линейки
+        L.control.scale().addTo(map2);
+
+        // перемещаем кнопки масштаба вниз слева
+        L.control.zoom({
+            position: 'bottomleft' // Варианты: 'bottomleft', 'bottomright'
+        }).addTo(map2);
+
+        // создаем пустую легенду для карты
+        const control2 = L.control.layers(baseMaps, null, { collapsed: true }).addTo(map2);
+
+        // загрузка границ поселения
+        fetch(url_map1)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить данные границ поселения');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup2 = L.geoJSON(geoData, {
+                    style: {
+                        color: "blue",
+                        fillColor: "#32CD32",
+                        fillOpacity: 0.0,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        // Проверяем, есть ли свойство name в JSON для всплывающего окна
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Усть-Кут";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map2);
+
+                // Автоматически центрируем карту по границам загруженных объектов
+                if (geoData.features && geoData.features.length > 0) {
+                    map2.fitBounds(layerGroup2.getBounds());
+                }
+
+                const layerNameBoundary = '<span class="layer-legend-icon boundary"></span>Граница города';
+
+                // Добавляем слой в созданную ранее легенду
+                control2.addOverlay(layerGroup2, layerNameBoundary);
+            })
+            .catch(error => console.error('Ошибка отображения границ поселения:', error)); 
+ 
+        // слой озелененных территорий
+        fetch(url_map2)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить озеленные территории');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup2 = L.geoJSON(geoData, {
+                    style: {
+                        color: "#aaaaaa",
+                        fillColor: "#32CD32",
+                        fillOpacity: 0.5,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Зона озелененных территорий";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map2);
+
+                // центрирование карты по объектам
+                if (geoData.features && geoData.features.length > 0) {
+                    map2.fitBounds(layerGroup2.getBounds());
+                }
+
+                const layerNamePark = '<span class="layer-legend-icon park"></span>Зона озелененных территорий';
+
+                // Добавляем слой в созданную ранее легенду
+                control2.addOverlay(layerGroup2, layerNamePark);
+            })
+            .catch(error => console.error('Парки отсутствуют:', error));
+
+        // слой жилых кварталов
+        fetch(url_map3)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить жилые кварталы');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup2 = L.geoJSON(geoData, {
+                    style: {
+                        color: "#aaaaaa",
+                        fillColor: "#5088c2",
+                        fillOpacity: 0.5,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Зона застройки жилыми домами";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map2);
+
+                // центрирование карты по объектам
+                if (geoData.features && geoData.features.length > 0) {
+                    map2.fitBounds(layerGroup2.getBounds());
+                }
+
+                const layerNameBlocks = '<span class="layer-legend-icon blocks"></span>Зона застройки жилыми домами';
+
+                // Добавляем слой в созданную ранее легенду
+                control2.addOverlay(layerGroup2, layerNameBlocks);
+            })
+            .catch(error => console.error('Жилые кварталы отсутствуют:', error));
+
+        // слой промышленной зоны
+        fetch(url_map4)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить промышленную зону');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup2 = L.geoJSON(geoData, {
+                    style: {
+                        color: "#aaaaaa",
+                        fillColor: "#fdd29d",
+                        fillOpacity: 0.5,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Производственная зона";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map2);
+
+                // центрирование карты по объектам
+                if (geoData.features && geoData.features.length > 0) {
+                    map2.fitBounds(layerGroup2.getBounds());
+                }
+
+                const layerNameProm = '<span class="layer-legend-icon prom_zone"></span>Производственная и коммунально-складская зоны';
+
+                // Добавляем слой в созданную ранее легенду
+                control2.addOverlay(layerGroup2, layerNameProm);
+            })
+            .catch(error => console.error('Промышленная зона отсутствует:', error));
+
+        // слой общественной зоны
+        fetch(url_map5)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить общественную зону');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup2 = L.geoJSON(geoData, {
+                    style: {
+                        color: "#aaaaaa",
+                        fillColor: "#a542ce",
+                        fillOpacity: 0.5,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Общественная и общественно-деловая зоны";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map2);
+
+                // центрирование карты по объектам
+                if (geoData.features && geoData.features.length > 0) {
+                    map2.fitBounds(layerGroup2.getBounds());
+                }
+
+                const layerNameBusiness = '<span class="layer-legend-icon business"></span>Общественная и общественно-деловая зоны';
+
+                // Добавляем слой в созданную ранее легенду
+                control2.addOverlay(layerGroup2, layerNameBusiness);
+            })
+            .catch(error => console.error('Общественная зона отсутствует:', error));
+
+        // слой зон отдыха
+        fetch(url_map6)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить зону отдыха');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup2 = L.geoJSON(geoData, {
+                    style: {
+                        color: "#aaaaaa",
+                        fillColor: "#f765ad",
+                        fillOpacity: 0.5,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Курортная и зона отдыха";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map2);
+
+                // центрирование карты по объектам
+                if (geoData.features && geoData.features.length > 0) {
+                    map2.fitBounds(layerGroup2.getBounds());
+                }
+
+                const layerNameResort = '<span class="layer-legend-icon resort"></span>Курортная и зона отдыха';
+
+                // Добавляем слой в созданную ранее легенду
+                control2.addOverlay(layerGroup2, layerNameResort);
+            })
+            .catch(error => console.error('Зона отдыха отсутствует:', error));
+
+        // слой зон кладбищ
+        fetch(url_map7)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить зону кладбищ');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup2 = L.geoJSON(geoData, {
+                    style: {
+                        color: "#aaaaaa",
+                        fillColor: "#7c512d",
+                        fillOpacity: 0.5,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Зона кладбищ";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map2);
+
+                // центрирование карты по объектам
+                if (geoData.features && geoData.features.length > 0) {
+                    map2.fitBounds(layerGroup2.getBounds());
+                }
+
+                const layerNameCemeteries = '<span class="layer-legend-icon cemeteries"></span>Зона кладбищ';
+
+                // Добавляем слой в созданную ранее легенду
+                control2.addOverlay(layerGroup2, layerNameCemeteries);
+            })
+            .catch(error => console.error('Зона кладбищ отсутствует:', error));
+
+        // слой транспортной зоны
+        fetch(url_map8)
+            .then(response => {
+                if (!response.ok) throw new Error('Не удалось загрузить транспортную зону');
+                return response.json();
+            })
+            .then(geoData => {
+                // Создаем слой Leaflet из полученных данных
+                const layerGroup2 = L.geoJSON(geoData, {
+                    style: {
+                        color: "#aaaaaa",
+                        fillColor: "#f7ef61",
+                        fillOpacity: 0.5,
+                    },
+                    onEachFeature: (feature, layer) => {
+                        let popupText = feature.properties && feature.properties.name ? feature.properties.name : "Зона транспортной инфраструктуры";
+                        layer.bindPopup(popupText);
+                    }
+                }).addTo(map2);
+
+                // центрирование карты по объектам
+                if (geoData.features && geoData.features.length > 0) {
+                    map2.fitBounds(layerGroup2.getBounds());
+                }
+
+                const layerNameCar = '<span class="layer-legend-icon car"></span>Зона транспортной инфраструктуры';
+
+                // Добавляем слой в созданную ранее легенду
+                control2.addOverlay(layerGroup2, layerNameCar);
+            })
+            .catch(error => console.error('Зона транспортной инфраструктуры отсутствует:', error));
+
+        // ==========================================
+        // УПРАВЛЕНИЕ И ПЕРЕКЛЮЧЕНИЕ
+        // ==========================================
+        const maps = { 'map1': map1, 'map2': map2 };
+
+        function switchMap(mapId, btn) {
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            document.querySelectorAll('.map').forEach(m => m.classList.remove('active'));
+            document.getElementById(mapId).classList.add('active');
+
+            // Сигнализируем карте о смене размеров видимого окна
+            maps[mapId].invalidateSize();
+        }
+
+        // задержка карты при загрузке
+        window.addEventListener('load', () => {
+            setTimeout(() => { map1.invalidateSize(); }, 100);
+        });
+
+        // отслеживает клик по кнопке сайдбара и переключает класс
+        document.addEventListener("DOMContentLoaded", function() {
+            const sidebar = document.getElementById('sidebar');
+            const toggleBtn = document.getElementById('toggle-sidebar');
+
+            toggleBtn.addEventListener('click', function() {
+                // Сворачиваем/разворачиваем сайдбар
+                sidebar.classList.toggle('collapsed');
+                
+                // Меняем стрелочку на бургер
+                if (sidebar.classList.contains('collapsed')) {
+                    toggleBtn.innerHTML = '➔';
+                } else {
+                    toggleBtn.innerHTML = '☰';
+                }
+
+                // Ждем окончания CSS-анимации (350 миллисекунд)
+                setTimeout(function() {
+                    // Обновляем первую карту
+                    if (typeof map1 !== 'undefined' && map1 !== null) {
+                        map1.invalidateSize();
+                    }
+                    
+                    // Обновляем вторую карту
+                    if (typeof map2 !== 'undefined' && map2 !== null) {
+                        map2.invalidateSize();
+                    }
+                }, 150);
+            });
+        });
+    </script>
+</body>
+</html>
